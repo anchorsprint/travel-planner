@@ -1,0 +1,3 @@
+#!/bin/bash
+echo "Starting Travel Planner on port 8089..."
+chainlit run app.py --port 8089
