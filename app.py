@@ -22,6 +22,7 @@ from agents.hotel_planner import plan_hotels
 from agents.activity_planner import plan_activities
 from agents.synthesizer import synthesize_itinerary
 from agents.reviewer import review_and_refine
+from agents.base import reset_citations, get_citations
 
 
 @cl.on_chat_start
@@ -54,6 +55,9 @@ What would you like help with?"""
 async def main(message: cl.Message):
     """Handle user messages with real-time progress updates."""
     user_input = message.content
+
+    # Reset citation tracker for new request
+    reset_citations()
 
     # Step 1: Detect intent
     async with cl.Step(name="🧠 Understanding your request") as intent_step:
@@ -251,6 +255,10 @@ async def main(message: cl.Message):
     score = review.score if hasattr(review, 'score') else 'N/A'
     stars = "⭐" * min(score, 10) if isinstance(score, int) else ""
 
+    # Build citations section
+    citations = get_citations()
+    citations_section = _format_citations(citations)
+
     await cl.Message(
         content=f"""# ✅ Your Trip to {context.destination}
 
@@ -261,6 +269,8 @@ async def main(message: cl.Message):
 
 {final_itinerary}
 
+---
+{citations_section}
 ---
 
 💡 **Want to adjust something?** Just tell me:
@@ -320,6 +330,40 @@ def _build_enhanced_request(context: TravelContext) -> str:
     if context.holiday_info:
         parts.append(f"\n\n**Holiday Context:**\n{context.holiday_info[:500]}...")
     return "\n".join(parts)
+
+
+def _format_citations(citations: dict) -> str:
+    """Format citations for display in the final response."""
+    searches = citations.get("searches", [])
+    sources = citations.get("sources", [])
+
+    if not searches and not sources:
+        return "\n**Sources:** Using AI knowledge base (no live search performed)\n"
+
+    parts = []
+
+    # Show what searches were made
+    if searches:
+        parts.append("**Research Queries:**")
+        for s in searches[:10]:  # Limit to 10 searches
+            parts.append(f"- \"{s['query']}\"")
+        parts.append("")
+
+    # Show sources used
+    if sources:
+        parts.append(f"**Sources ({len(sources)} references):**")
+        for i, src in enumerate(sources[:15], 1):  # Limit to 15 sources
+            title = src["title"][:60] + "..." if len(src["title"]) > 60 else src["title"]
+            parts.append(f"{i}. [{title}]({src['url']})")
+        if len(sources) > 15:
+            parts.append(f"   *...and {len(sources) - 15} more sources*")
+        parts.append("")
+    else:
+        parts.append("**Sources:** No live search results (API not configured)")
+        parts.append("*Using AI knowledge - information may not be current*")
+        parts.append("")
+
+    return "\n" + "\n".join(parts)
 
 
 @cl.on_settings_update
