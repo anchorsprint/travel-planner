@@ -22,7 +22,7 @@ from agents.hotel_planner import plan_hotels
 from agents.activity_planner import plan_activities
 from agents.synthesizer import synthesize_itinerary
 from agents.reviewer import review_and_refine
-from agents.base import reset_citations, get_citations
+from agents.base import reset_citations, get_step_summary
 
 
 @cl.on_chat_start
@@ -119,10 +119,12 @@ async def main(message: cl.Message):
     if context.needs_holiday_research:
         async with cl.Step(name="📅 Checking holidays") as holiday_step:
             holiday_step.output = f"Researching {context.origin_country} holidays..."
+            reset_citations()
 
             try:
                 context = await asyncio.to_thread(update_context_with_holidays, context)
-                holiday_step.output = "✓ Holiday calendar checked"
+                step_info = get_step_summary()
+                holiday_step.output = f"✓ Holiday calendar checked{step_info}"
             except Exception as e:
                 holiday_step.output = f"⚠️ Holiday check failed: {str(e)}"
 
@@ -130,16 +132,19 @@ async def main(message: cl.Message):
     if context.needs_family_planning:
         async with cl.Step(name="👨‍👩‍👧‍👦 Analyzing family needs") as family_step:
             family_step.output = f"Setting up for kids ages {', '.join(str(a) for a in context.kid_ages)}..."
+            reset_citations()
 
             try:
                 context = await asyncio.to_thread(update_context_with_family_needs, context)
-                family_step.output = f"✓ Family filters ready ({context.get_kid_age_group()}-friendly)"
+                step_info = get_step_summary()
+                family_step.output = f"✓ Family filters ready ({context.get_kid_age_group()}-friendly){step_info}"
             except Exception as e:
                 family_step.output = f"⚠️ Family analysis failed: {str(e)}"
 
     # Step 5: Destination research
     async with cl.Step(name="🔍 Researching destination") as research_step:
         research_step.output = f"Learning about {context.destination}..."
+        reset_citations()  # Reset for this step
 
         try:
             preferences = _build_preferences(context)
@@ -150,12 +155,16 @@ async def main(message: cl.Message):
                 preferences
             )
             context.destination_research = research
-            research_step.output = f"✓ {context.destination} research complete"
+            step_info = get_step_summary()
+            research_step.output = f"✓ {context.destination} research complete{step_info}"
         except Exception as e:
             await cl.Message(content=f"❌ Error researching destination: {str(e)}").send()
             return
 
     # Step 6-8: Parallel planning (flights, hotels, activities)
+    # Reset citations for parallel search phase
+    reset_citations()
+
     async with cl.Step(name="✈️ Finding flights") as flights_step:
         flights_step.output = "Searching flights..."
 
@@ -200,9 +209,11 @@ async def main(message: cl.Message):
 
         flights, hotels, activities = await asyncio.gather(flights_task, hotels_task, activities_task)
 
-        flights_step.output = "✓ Flight options found"
-        hotels_step.output = "✓ Hotels found"
-        activities_step.output = "✓ Activities curated"
+        # Get combined search info for all parallel tasks
+        step_info = get_step_summary()
+        flights_step.output = f"✓ Flight options found{step_info}"
+        hotels_step.output = f"✓ Hotels found"
+        activities_step.output = f"✓ Activities curated"
 
     except Exception as e:
         await cl.Message(content=f"❌ Error planning components: {str(e)}").send()
@@ -255,10 +266,6 @@ async def main(message: cl.Message):
     score = review.score if hasattr(review, 'score') else 'N/A'
     stars = "⭐" * min(score, 10) if isinstance(score, int) else ""
 
-    # Build citations section
-    citations = get_citations()
-    citations_section = _format_citations(citations)
-
     await cl.Message(
         content=f"""# ✅ Your Trip to {context.destination}
 
@@ -269,8 +276,6 @@ async def main(message: cl.Message):
 
 {final_itinerary}
 
----
-{citations_section}
 ---
 
 💡 **Want to adjust something?** Just tell me:
@@ -330,40 +335,6 @@ def _build_enhanced_request(context: TravelContext) -> str:
     if context.holiday_info:
         parts.append(f"\n\n**Holiday Context:**\n{context.holiday_info[:500]}...")
     return "\n".join(parts)
-
-
-def _format_citations(citations: dict) -> str:
-    """Format citations for display in the final response."""
-    searches = citations.get("searches", [])
-    sources = citations.get("sources", [])
-
-    if not searches and not sources:
-        return "\n**Sources:** Using AI knowledge base (no live search performed)\n"
-
-    parts = []
-
-    # Show what searches were made
-    if searches:
-        parts.append("**Research Queries:**")
-        for s in searches[:10]:  # Limit to 10 searches
-            parts.append(f"- \"{s['query']}\"")
-        parts.append("")
-
-    # Show sources used
-    if sources:
-        parts.append(f"**Sources ({len(sources)} references):**")
-        for i, src in enumerate(sources[:15], 1):  # Limit to 15 sources
-            title = src["title"][:60] + "..." if len(src["title"]) > 60 else src["title"]
-            parts.append(f"{i}. [{title}]({src['url']})")
-        if len(sources) > 15:
-            parts.append(f"   *...and {len(sources) - 15} more sources*")
-        parts.append("")
-    else:
-        parts.append("**Sources:** No live search results (API not configured)")
-        parts.append("*Using AI knowledge - information may not be current*")
-        parts.append("")
-
-    return "\n" + "\n".join(parts)
 
 
 @cl.on_settings_update

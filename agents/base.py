@@ -8,22 +8,50 @@ from strands import Agent, tool
 from strands.models import OpenAIModel
 from config import DEFAULT_MODEL, FAST_MODEL, TEMPERATURE_FACTUAL, TEMPERATURE_CREATIVE
 
-# Global citation tracker - stores all sources used during a planning session
+# Global citation tracker - stores sources used during current step
 _citation_tracker = {
     "searches": [],  # List of {query, timestamp}
-    "sources": [],   # List of {title, url, snippet, used_for}
+    "sources": [],   # List of {title, url, snippet}
 }
 
 
 def reset_citations():
-    """Reset citation tracker for a new planning session."""
+    """Reset citation tracker for a new step."""
     global _citation_tracker
     _citation_tracker = {"searches": [], "sources": []}
 
 
 def get_citations() -> dict:
-    """Get all citations from the current session."""
+    """Get citations from the current step."""
     return _citation_tracker.copy()
+
+
+def get_step_summary() -> str:
+    """Get a formatted summary of what this step searched and found."""
+    searches = _citation_tracker.get("searches", [])
+    sources = _citation_tracker.get("sources", [])
+
+    if not searches and not sources:
+        return ""
+
+    lines = []
+
+    # Show searches made
+    if searches:
+        lines.append("\n**Searches:**")
+        for s in searches[:5]:  # Limit to 5
+            lines.append(f"  - \"{s['query']}\"")
+
+    # Show sources found
+    if sources:
+        lines.append(f"\n**Sources ({len(sources)}):**")
+        for src in sources[:5]:  # Limit to 5
+            title = src["title"][:50] + "..." if len(src["title"]) > 50 else src["title"]
+            lines.append(f"  - [{title}]({src['url']})")
+        if len(sources) > 5:
+            lines.append(f"  - *+{len(sources) - 5} more*")
+
+    return "\n".join(lines)
 
 
 def add_citation(title: str, url: str, snippet: str, used_for: str = ""):
@@ -35,8 +63,7 @@ def add_citation(title: str, url: str, snippet: str, used_for: str = ""):
     _citation_tracker["sources"].append({
         "title": title,
         "url": url,
-        "snippet": snippet[:200] + "..." if len(snippet) > 200 else snippet,
-        "used_for": used_for
+        "snippet": snippet[:200] + "..." if len(snippet) > 200 else snippet
     })
 
 
